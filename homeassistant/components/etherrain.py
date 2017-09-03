@@ -15,7 +15,7 @@ from homeassistant.const import (
     CONF_HOST, CONF_PASSWORD, CONF_USERNAME)
 import homeassistant.helpers.config_validation as cv
 
-REQUIREMENTS = ['etherrain=0.3']
+REQUIREMENTS = ['etherrain==0.3']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,12 +41,9 @@ def setup(hass, config):
     password = conf.get(CONF_PASSWORD, None)
 
     hass.data[DOMAIN] = {}
-    hass.data[DOMAIN]['server_origin'] = server_origin
-    hass.data[DOMAIN]['username'] = username
-    hass.data[DOMAIN]['password'] = password
-    hass.data[DOMAIN][er] = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
+    hass.data[DOMAIN]['er'] = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
 
-    return hass.data[DOMAIN][er].login()
+    return hass.data[DOMAIN]['er'].login()
 
 # retrieve current status
 # http://<er_addr>/result.cgi?xs
@@ -64,8 +61,8 @@ def setup(hass, config):
 # </body>
 def get_state(valve):
     """Get the current state of a valve."""
-    hass.data[DOMAIN][er].update_status()
-    status = hass.data[DOMAIN][er].get_state()
+    hass.data[DOMAIN]['er'].update_status()
+    status = hass.data[DOMAIN]['er'].get_state()
 
     if 'os' in status and status['os'] == 'WT':
         # _LOGGER.info("valve={0} and waiting".format(valve, status['ri']))
@@ -85,8 +82,8 @@ def get_state(valve):
 
 def water_off():
         """Turn off all valves."""
-        hass.data[DOMAIN][er].stop()
+        hass.data[DOMAIN]['er'].stop()
 
 def water_on(valve, duration):
         """Turn on a specific valve for some number of minutes."""
-        hass.data[DOMAIN][er].irrigate(valve, duration)
+        hass.data[DOMAIN]['er'].irrigate(valve, duration)
