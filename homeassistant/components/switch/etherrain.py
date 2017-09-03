@@ -66,23 +66,14 @@ class ERValveSwitches(SwitchDevice):
         return self._state
 
     def turn_on(self):
-        """Turn a valve on."""
-        valve = {}
-        valve["duration"] = self._duration
-        valve["valve"] = self._valve_id
-        valve["command"] = er.WATER_ON
         # _LOGGER.info("turn on etherrain switch {0}".format(self._valve_id))
         self._state = True
-        er.change_state(valve)
+        er.water_on(self._valve_id, self._duration)
 
     def turn_off(self):
         """Turn a valve off."""
         # We should first check the state and if it's "BZ" and the valve_id
         # matches, then turn it off.  For now, just turn it off regardless.
-        valve = {}
-        valve["duration"] = 0
-        valve["valve"] = 0
-        valve["command"] = er.WATER_OFF
         self._state = False
+        er.water_off()
         # _LOGGER.info("turn off etherrain switch {0}".format(self._valve_id))
-        er.change_state(valve)

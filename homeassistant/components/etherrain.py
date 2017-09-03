@@ -1,30 +1,26 @@
-""".
+"""
 
-Support for Etherrain/8.
+Support for Quick Smart Etherrain/8.
+
+For more details about this component, please refer to the documentation at
+https://home-assistant.io/components/etherrain/
 
 """
 import logging
 
-import requests
+import etherrain
 import voluptuous as vol
 
 from homeassistant.const import (
     CONF_HOST, CONF_PASSWORD, CONF_USERNAME)
 import homeassistant.helpers.config_validation as cv
 
+REQUIREMENTS = ['etherrain=0.3']
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_SSL = False
 DEFAULT_TIMEOUT = 10
 DOMAIN = 'etherrain'
-STATE = 1
-WATER_ON = 2
-WATER_OFF = 3
-
-LOGIN_RETRIES = 2
-
-ER = {}
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
@@ -37,82 +33,20 @@ CONFIG_SCHEMA = vol.Schema({
 
 def setup(hass, config):
     """Set up the Etherrain component."""
-    global ER
-    ER = {}
 
     conf = config[DOMAIN]
-    schema = 'http'
 
-    server_origin = '{}://{}'.format(schema, conf[CONF_HOST])
+    hostname = conf[CONF_HOST]
     username = conf.get(CONF_USERNAME, None)
     password = conf.get(CONF_PASSWORD, None)
 
-    ER['server_origin'] = server_origin
-    ER['username'] = username
-    ER['password'] = password
+    hass.data[DOMAIN] = {}
+    hass.data[DOMAIN]['server_origin'] = server_origin
+    hass.data[DOMAIN]['username'] = username
+    hass.data[DOMAIN]['password'] = password
+    hass.data[DOMAIN][er] = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
 
-    hass.data[DOMAIN] = ER
-
-    return login()
-
-
-# pylint: disable=no-member
-def login():
-    """Login to the EtherRain API."""
-    # _LOGGER.info("Attempting to login to EtherRain")
-
-    # ergetcfg.cgi?lu=admin\&lp=deadbeef
-    url = '{0}/ergetcfg.cgi?lu={1}&lp={2}'.format(
-        ER['server_origin'], ER['username'], ER['password'])
-    req = requests.get(url, timeout=DEFAULT_TIMEOUT)
-
-    if not req.ok:
-        _LOGGER.error("Connection error logging into EtherRain")
-        return False
-
-    return True
-
-
-# http://er_addr/result.cgi?xi=0:1:0:0:0:0:0:0:0
-def _er_request(data=None):
-    """Perform an EtherRain request."""
-    valve = 0
-    duration = 0
-    cmd = 0
-    if data is not 'None':
-        cmd = data["command"]
-        valve = data["valve"]
-        duration = data["duration"]
-    if cmd == STATE:
-        # _LOGGER.info("Get state".format(valve,duration))
-        url = '{0}/result.cgi?xs'.format(ER['server_origin'])
-        duration = 0
-    if cmd == WATER_OFF:
-        # _LOGGER.info("Water off".format(valve,duration))
-        url = '{0}/result.cgi?xr'.format(ER['server_origin'])
-    if cmd == WATER_ON:
-        # _LOGGER.info("Set {0} to {1} minutes".format(valve, duration))
-        valves = ["0", "0", "0", "0", "0", "0", "0", "0", "0"]
-        valves[valve] = duration
-        url = '{0}/result.cgi?xi=0:{1}:{2}:{3}:{4}:{5}:{6}:{7}:{8}'.format(
-            ER['server_origin'], valves[1], valves[2], valves[3], valves[4],
-            valves[5], valves[6], valves[7], valves[8])
-
-    # Always log in. The etherrain/8 will only take commands from the last IP
-    # that logged in to it.   So if a different host on the network is also
-    # issuing commands to the ER/8, then our commands will fail.  There is
-    # obviously a bit of a race condition here.  This at least somewhat
-    # mitigates the problem.
-    login()
-    # _LOGGER.info("url is {0}".format(url))
-    req = requests.get(url)
-    # _LOGGER.info("Returned: {0}".format(req.status_code))
-
-    if not req.ok:
-        _LOGGER.error("Unable to get API response from EtherRain")
-
-    return req
-
+    return hass.data[DOMAIN][er].login()
 
 # retrieve current status
 # http://<er_addr>/result.cgi?xs
@@ -130,27 +64,9 @@ def _er_request(data=None):
 # </body>
 def get_state(valve):
     """Get the current state of a valve."""
-    data = {}
-    data["valve"] = valve
-    data["duration"] = 0
-    data["command"] = STATE
-    state = _er_request(data)
-    # _LOGGER.info("got {0} from etherrain".format(state.text))
-    status = {}
-    for b_line in state.iter_lines():
-        line = b_line.decode('utf8').strip()
-        # _LOGGER.info("iterating: {0}".format(line))
-        if ":" in line:
-            attr, value = line.split(":")
-            value = value.replace(" <br>", "").strip()
-            attr = attr.strip()
-            if attr in ['ac', 'os', 'cs', 'rz', 'ri', 'rn']:
-                status[attr] = value
+    hass.data[DOMAIN][er].update_status()
+    status = hass.data[DOMAIN][er].get_state()
 
-    # ri contains the last valve to run.  os is the current state of that
-    # valve. (ready or busy)
-    # (XXX: The valve number returned is 0-7 but the watering command
-    # takes 1-8)
     if 'os' in status and status['os'] == 'WT':
         # _LOGGER.info("valve={0} and waiting".format(valve, status['ri']))
         return 1
@@ -166,7 +82,11 @@ def get_state(valve):
 
 
 # pylint: disable=no-member
-def change_state(valve_data):
-    """Change the state of a valve."""
-    # _LOGGER.info("Change State: {0}".format(valve_data))
-    return _er_request(data=valve_data)
+
+def water_off():
+        """Turn off all valves."""
+        hass.data[DOMAIN][er].stop()
+
+def water_on(valve, duration):
+        """Turn on a specific valve for some number of minutes."""
+        hass.data[DOMAIN][er].irrigate(valve, duration)
