@@ -1852,3 +1852,6 @@ etherrain==0.6
 
 # homeassistant.components.zoneminder
 zm-py==0.3.3
+
+# homeassistant.components.etherrain
+etherrain==0.3
