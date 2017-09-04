@@ -15,6 +15,7 @@ import homeassistant.helpers.config_validation as cv
 _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ['etherrain']
+DOMAIN = 'etherrain'
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required("valve_id"): cv.positive_int,
@@ -27,14 +28,17 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     valve_name = config.get("name")
     duration = config.get("duration")
 
-    add_devices([ERValveSwitches(valve_id, valve_name, duration)])
+    api = hass.data[DOMAIN]['er']
+
+    add_devices([ERValveSwitches(api, valve_id, valve_name, duration)])
 
 
 class ERValveSwitches(SwitchDevice):
     """Representation of an Etherrain valve."""
 
-    def __init__(self, valve_id, valve_name, duration):
+    def __init__(self, api, valve_id, valve_name, duration):
         """Initialize ERValveSwitches."""
+        self.api = api
         self._valve_id = valve_id
         self._valve_name = valve_name
         if duration is not None:
@@ -52,7 +56,8 @@ class ERValveSwitches(SwitchDevice):
 
     def update(self):
         """Update valve state."""
-        state = er.get_state(self._valve_id)
+        self.api.update()
+        state = self.api.get_state(self._valve_id)
 
         self._state = state
         # _LOGGER.info("update etherrain switch {0} - {1}".format(
@@ -68,12 +73,12 @@ class ERValveSwitches(SwitchDevice):
     def turn_on(self):
         # _LOGGER.info("turn on etherrain switch {0}".format(self._valve_id))
         self._state = True
-        er.water_on(self._valve_id, self._duration)
+        self.api.water_on(self._valve_id, self._duration)
 
     def turn_off(self):
         """Turn a valve off."""
         # We should first check the state and if it's "BZ" and the valve_id
         # matches, then turn it off.  For now, just turn it off regardless.
         self._state = False
-        er.water_off()
+        self.api.water_off()
         # _LOGGER.info("turn off etherrain switch {0}".format(self._valve_id))

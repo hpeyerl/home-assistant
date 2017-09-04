@@ -41,49 +41,43 @@ def setup(hass, config):
     password = conf.get(CONF_PASSWORD, None)
 
     hass.data[DOMAIN] = {}
-    hass.data[DOMAIN]['er'] = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
+    hass.data[DOMAIN]['er'] = EtherRainAPI(hostname, username, password, timeout=DEFAULT_TIMEOUT)
 
-    return hass.data[DOMAIN]['er'].login()
+    return hass.data[DOMAIN]['er'].logged_in
 
-# retrieve current status
-# http://<er_addr>/result.cgi?xs
-#
-# <body>
-#       EtherRain Device Status <br>
-#       un:EtherRain 8
-#       ma: 01.00.44.03.0A.01  <br>
-#       ac: <br>
-#       os: RD <br>
-#       cs: OK <br>
-#       rz: UK <br>
-#       ri: 0 <br>
-#       rn: 0 <br>
-# </body>
-def get_state(valve):
-    """Get the current state of a valve."""
-    hass.data[DOMAIN]['er'].update_status()
-    status = hass.data[DOMAIN]['er'].get_state()
+class EtherRainAPI(object):
+    def __init__(self, hostname, username, password, timeout):
+        self.er = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
+        self.logged_in = self.er.login()
 
-    if 'os' in status and status['os'] == 'WT':
-        # _LOGGER.info("valve={0} and waiting".format(valve, status['ri']))
-        return 1
-    if 'ri' in status and int(status['ri']) == valve-1:
-        if 'os' in status and status['os'] == 'RD':
-            # _LOGGER.info("valve={0} and ready".format(valve, status['ri']))
-            return 0
-        if 'os' in status and status['os'] == 'BZ':
-            # _LOGGER.info("valve={0} and busy".format(valve, status['ri']))
+    def update(self):
+        self.er.update_status()
+
+    def get_state(self, valve):
+        """Get the current state of a valve."""
+        self.update()
+        status = self.er.get_status()
+
+        if 'os' in status and status['os'] == 'WT':
+            # _LOGGER.info("valve={0} and waiting".format(valve, status['ri']))
             return 1
-    else:
-        return 0
+        if 'ri' in status and int(status['ri']) == valve-1:
+            if 'os' in status and status['os'] == 'RD':
+                # _LOGGER.info("valve={0} and ready".format(valve, status['ri']))
+                return 0
+            if 'os' in status and status['os'] == 'BZ':
+                # _LOGGER.info("valve={0} and busy".format(valve, status['ri']))
+                return 1
+        else:
+            return 0
 
 
-# pylint: disable=no-member
+    # pylint: disable=no-member
 
-def water_off():
+    def water_off(self):
         """Turn off all valves."""
-        hass.data[DOMAIN]['er'].stop()
+        self.er.stop()
 
-def water_on(valve, duration):
+    def water_on(self, valve, duration):
         """Turn on a specific valve for some number of minutes."""
-        hass.data[DOMAIN]['er'].irrigate(valve, duration)
+        self.er.irrigate(valve, duration)
