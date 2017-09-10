@@ -1044,4 +1044,4 @@ zengge==0.2
 zeroconf==0.19.1
 
 # homeassistant.components.etherrain
-etherrain==0.3
+etherrain==0.4
