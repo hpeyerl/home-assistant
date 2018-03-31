@@ -49,6 +49,7 @@ class EtherRainAPI(object):
     def __init__(self, hostname, username, password, timeout):
         self.er = etherrain.EtherRain(hostname, username, password, timeout=DEFAULT_TIMEOUT)
         self.logged_in = self.er.login()
+        self.update()
 
     def update(self):
         self.er.update_status()

@@ -11,7 +11,6 @@ from homeassistant.components.switch import (SwitchDevice, PLATFORM_SCHEMA)
 import homeassistant.components.etherrain as er
 import homeassistant.helpers.config_validation as cv
 
-
 _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ['etherrain']
@@ -56,7 +55,6 @@ class ERValveSwitches(SwitchDevice):
 
     def update(self):
         """Update valve state."""
-        self.api.update()
         state = self.api.get_state(self._valve_id)
 
         self._state = state
