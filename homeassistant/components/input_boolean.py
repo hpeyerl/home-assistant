@@ -25,7 +25,6 @@ ENTITY_ID_FORMAT = DOMAIN + '.{}'
 _LOGGER = logging.getLogger(__name__)
 
 CONF_INITIAL = 'initial'
-DEFAULT_INITIAL = False
 
 SERVICE_SCHEMA = vol.Schema({
     vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
@@ -103,11 +102,14 @@ def async_setup(hass, config):
             yield from asyncio.wait(tasks, loop=hass.loop)
 
     hass.services.async_register(
-        DOMAIN, SERVICE_TURN_OFF, async_handler_service, schema=SERVICE_SCHEMA)
+        DOMAIN, SERVICE_TURN_OFF, async_handler_service,
+        schema=SERVICE_SCHEMA)
     hass.services.async_register(
-        DOMAIN, SERVICE_TURN_ON, async_handler_service, schema=SERVICE_SCHEMA)
+        DOMAIN, SERVICE_TURN_ON, async_handler_service,
+        schema=SERVICE_SCHEMA)
     hass.services.async_register(
-        DOMAIN, SERVICE_TOGGLE, async_handler_service, schema=SERVICE_SCHEMA)
+        DOMAIN, SERVICE_TOGGLE, async_handler_service,
+        schema=SERVICE_SCHEMA)
 
     yield from component.async_add_entities(entities)
     return True
@@ -135,7 +137,7 @@ class InputBoolean(ToggleEntity):
 
     @property
     def icon(self):
-        """Returh the icon to be used for this entity."""
+        """Return the icon to be used for this entity."""
         return self._icon
 
     @property

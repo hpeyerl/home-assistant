@@ -13,14 +13,29 @@ _LOGGER = logging.getLogger(__name__)
 DEPENDENCIES = ['homematic']
 
 HM_STATE_HA_CAST = {
-    'RotaryHandleSensor': {0: 'closed', 1: 'tilted', 2: 'open'},
-    'WaterSensor': {0: 'dry', 1: 'wet', 2: 'water'},
-    'CO2Sensor': {0: 'normal', 1: 'added', 2: 'strong'},
+    'RotaryHandleSensor': {0: 'closed',
+                           1: 'tilted',
+                           2: 'open'},
+    'WaterSensor': {0: 'dry',
+                    1: 'wet',
+                    2: 'water'},
+    'CO2Sensor': {0: 'normal',
+                  1: 'added',
+                  2: 'strong'},
+    'IPSmoke': {0: 'off',
+                1: 'primary',
+                2: 'intrusion',
+                3: 'secondary'},
+    'RFSiren': {0: 'disarmed',
+                1: 'extsens_armed',
+                2: 'allsens_armed',
+                3: 'alarm_blocked'},
 }
 
 HM_UNIT_HA_CAST = {
     'HUMIDITY': '%',
     'TEMPERATURE': '°C',
+    'ACTUAL_TEMPERATURE': '°C',
     'BRIGHTNESS': '#',
     'POWER': 'W',
     'CURRENT': 'mA',
@@ -43,6 +58,7 @@ HM_ICON_HA_CAST = {
     'WIND_SPEED': 'mdi:weather-windy',
     'HUMIDITY': 'mdi:water-percent',
     'TEMPERATURE': 'mdi:thermometer',
+    'ACTUAL_TEMPERATURE': 'mdi:thermometer',
     'LUX': 'mdi:weather-sunny',
     'BRIGHTNESS': 'mdi:invert-colors',
     'POWER': 'mdi:flash-red-eye',

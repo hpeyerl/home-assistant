@@ -11,13 +11,12 @@ from typing import Any, Optional, Dict
 
 import voluptuous as vol
 
-import homeassistant.components as core_components
+from homeassistant import (
+    core, config as conf_util, config_entries, loader,
+    components as core_components)
 from homeassistant.components import persistent_notification
-import homeassistant.config as conf_util
-import homeassistant.core as core
 from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
 from homeassistant.setup import async_setup_component
-import homeassistant.loader as loader
 from homeassistant.util.logging import AsyncHandler
 from homeassistant.util.package import async_get_user_site, get_user_site
 from homeassistant.util.yaml import clear_secret_cache
@@ -27,18 +26,23 @@ from homeassistant.helpers.signal import async_register_signal_handling
 _LOGGER = logging.getLogger(__name__)
 
 ERROR_LOG_FILENAME = 'home-assistant.log'
+
+# hass.data key for logging information.
+DATA_LOGGING = 'logging'
+
 FIRST_INIT_COMPONENT = set((
-    'recorder', 'mqtt', 'mqtt_eventstream', 'logger', 'introduction',
-    'frontend', 'history'))
+    'system_log', 'recorder', 'mqtt', 'mqtt_eventstream', 'logger',
+    'introduction', 'frontend', 'history'))
 
 
 def from_config_dict(config: Dict[str, Any],
-                     hass: Optional[core.HomeAssistant]=None,
-                     config_dir: Optional[str]=None,
-                     enable_log: bool=True,
-                     verbose: bool=False,
-                     skip_pip: bool=False,
-                     log_rotate_days: Any=None) \
+                     hass: Optional[core.HomeAssistant] = None,
+                     config_dir: Optional[str] = None,
+                     enable_log: bool = True,
+                     verbose: bool = False,
+                     skip_pip: bool = False,
+                     log_rotate_days: Any = None,
+                     log_file: Any = None) \
                      -> Optional[core.HomeAssistant]:
     """Try to configure Home Assistant from a configuration dictionary.
 
@@ -56,7 +60,7 @@ def from_config_dict(config: Dict[str, Any],
     hass = hass.loop.run_until_complete(
         async_from_config_dict(
             config, hass, config_dir, enable_log, verbose, skip_pip,
-            log_rotate_days)
+            log_rotate_days, log_file)
     )
 
     return hass
@@ -65,11 +69,12 @@ def from_config_dict(config: Dict[str, Any],
 @asyncio.coroutine
 def async_from_config_dict(config: Dict[str, Any],
                            hass: core.HomeAssistant,
-                           config_dir: Optional[str]=None,
-                           enable_log: bool=True,
-                           verbose: bool=False,
-                           skip_pip: bool=False,
-                           log_rotate_days: Any=None) \
+                           config_dir: Optional[str] = None,
+                           enable_log: bool = True,
+                           verbose: bool = False,
+                           skip_pip: bool = False,
+                           log_rotate_days: Any = None,
+                           log_file: Any = None) \
                            -> Optional[core.HomeAssistant]:
     """Try to configure Home Assistant from a configuration dictionary.
 
@@ -77,6 +82,10 @@ def async_from_config_dict(config: Dict[str, Any],
     This method is a coroutine.
     """
     start = time()
+
+    if enable_log:
+        async_enable_logging(hass, verbose, log_rotate_days, log_file)
+
     core_config = config.get(core.DOMAIN, {})
 
     try:
@@ -87,9 +96,6 @@ def async_from_config_dict(config: Dict[str, Any],
 
     yield from hass.async_add_job(conf_util.process_ha_config_upgrade, hass)
 
-    if enable_log:
-        async_enable_logging(hass, verbose, log_rotate_days)
-
     hass.config.skip_pip = skip_pip
     if skip_pip:
         _LOGGER.warning("Skipping pip installation of required modules. "
@@ -98,21 +104,25 @@ def async_from_config_dict(config: Dict[str, Any],
     if not loader.PREPARED:
         yield from hass.async_add_job(loader.prepare, hass)
 
+    # Make a copy because we are mutating it.
+    config = OrderedDict(config)
+
     # Merge packages
     conf_util.merge_packages_config(
         config, core_config.get(conf_util.CONF_PACKAGES, {}))
 
-    # Make a copy because we are mutating it.
-    # Use OrderedDict in case original one was one.
-    # Convert values to dictionaries if they are None
-    new_config = OrderedDict()
+    # Ensure we have no None values after merge
     for key, value in config.items():
-        new_config[key] = value or {}
-    config = new_config
+        if not value:
+            config[key] = {}
+
+    hass.config_entries = config_entries.ConfigEntries(hass, config)
+    yield from hass.config_entries.async_load()
 
     # Filter out the repeating and common config section [homeassistant]
     components = set(key.split(' ')[0] for key in config.keys()
                      if key != core.DOMAIN)
+    components.update(hass.config_entries.async_domains())
 
     # setup components
     # pylint: disable=not-an-iterable
@@ -150,10 +160,11 @@ def async_from_config_dict(config: Dict[str, Any],
 
 
 def from_config_file(config_path: str,
-                     hass: Optional[core.HomeAssistant]=None,
-                     verbose: bool=False,
-                     skip_pip: bool=True,
-                     log_rotate_days: Any=None):
+                     hass: Optional[core.HomeAssistant] = None,
+                     verbose: bool = False,
+                     skip_pip: bool = True,
+                     log_rotate_days: Any = None,
+                     log_file: Any = None):
     """Read the configuration file and try to start all the functionality.
 
     Will add functionality to 'hass' parameter if given,
@@ -165,7 +176,7 @@ def from_config_file(config_path: str,
     # run task
     hass = hass.loop.run_until_complete(
         async_from_config_file(
-            config_path, hass, verbose, skip_pip, log_rotate_days)
+            config_path, hass, verbose, skip_pip, log_rotate_days, log_file)
     )
 
     return hass
@@ -174,9 +185,10 @@ def from_config_file(config_path: str,
 @asyncio.coroutine
 def async_from_config_file(config_path: str,
                            hass: core.HomeAssistant,
-                           verbose: bool=False,
-                           skip_pip: bool=True,
-                           log_rotate_days: Any=None):
+                           verbose: bool = False,
+                           skip_pip: bool = True,
+                           log_rotate_days: Any = None,
+                           log_file: Any = None):
     """Read the configuration file and try to start all the functionality.
 
     Will add functionality to 'hass' parameter.
@@ -187,7 +199,7 @@ def async_from_config_file(config_path: str,
     hass.config.config_dir = config_dir
     yield from async_mount_local_lib_path(config_dir, hass.loop)
 
-    async_enable_logging(hass, verbose, log_rotate_days)
+    async_enable_logging(hass, verbose, log_rotate_days, log_file)
 
     try:
         config_dict = yield from hass.async_add_job(
@@ -204,8 +216,8 @@ def async_from_config_file(config_path: str,
 
 
 @core.callback
-def async_enable_logging(hass: core.HomeAssistant, verbose: bool=False,
-                         log_rotate_days=None) -> None:
+def async_enable_logging(hass: core.HomeAssistant, verbose: bool = False,
+                         log_rotate_days=None, log_file=None) -> None:
     """Set up the logging.
 
     This method must be run in the event loop.
@@ -239,13 +251,18 @@ def async_enable_logging(hass: core.HomeAssistant, verbose: bool=False,
         pass
 
     # Log errors to a file if we have write access to file or config dir
-    err_log_path = hass.config.path(ERROR_LOG_FILENAME)
+    if log_file is None:
+        err_log_path = hass.config.path(ERROR_LOG_FILENAME)
+    else:
+        err_log_path = os.path.abspath(log_file)
+
     err_path_exists = os.path.isfile(err_log_path)
+    err_dir = os.path.dirname(err_log_path)
 
     # Check if we can write to the error log if it exists or that
     # we can create files in the containing directory if not.
     if (err_path_exists and os.access(err_log_path, os.W_OK)) or \
-       (not err_path_exists and os.access(hass.config.config_dir, os.W_OK)):
+       (not err_path_exists and os.access(err_dir, os.W_OK)):
 
         if log_rotate_days:
             err_handler = logging.handlers.TimedRotatingFileHandler(
@@ -272,6 +289,8 @@ def async_enable_logging(hass: core.HomeAssistant, verbose: bool=False,
         logger.addHandler(async_handler)
         logger.setLevel(logging.INFO)
 
+        # Save the log file location for access by other components.
+        hass.data[DATA_LOGGING] = err_log_path
     else:
         _LOGGER.error(
             "Unable to setup error log %s (access denied)", err_log_path)

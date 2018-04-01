@@ -9,7 +9,7 @@ from tests.common import (
     mock_mqtt_component, fire_mqtt_message, get_test_home_assistant)
 
 
-class TestSensorMQTT(unittest.TestCase):
+class TestSwitchMQTT(unittest.TestCase):
     """Test the MQTT switch."""
 
     def setUp(self):  # pylint: disable=invalid-name
@@ -70,16 +70,17 @@ class TestSensorMQTT(unittest.TestCase):
         switch.turn_on(self.hass, 'switch.test')
         self.hass.block_till_done()
 
-        self.assertEqual(('command-topic', 'beer on', 2, False),
-                         self.mock_publish.mock_calls[-2][1])
+        self.mock_publish.async_publish.assert_called_once_with(
+            'command-topic', 'beer on', 2, False)
+        self.mock_publish.async_publish.reset_mock()
         state = self.hass.states.get('switch.test')
         self.assertEqual(STATE_ON, state.state)
 
         switch.turn_off(self.hass, 'switch.test')
         self.hass.block_till_done()
 
-        self.assertEqual(('command-topic', 'beer off', 2, False),
-                         self.mock_publish.mock_calls[-2][1])
+        self.mock_publish.async_publish.assert_called_once_with(
+            'command-topic', 'beer off', 2, False)
         state = self.hass.states.get('switch.test')
         self.assertEqual(STATE_OFF, state.state)
 
@@ -156,7 +157,7 @@ class TestSensorMQTT(unittest.TestCase):
         state = self.hass.states.get('switch.test')
         self.assertEqual(STATE_ON, state.state)
 
-    def test_custom_availability_payload(self):
+    def test_default_availability_payload(self):
         """Test the availability payload."""
         assert setup_component(self.hass, switch.DOMAIN, {
             switch.DOMAIN: {
@@ -166,9 +167,7 @@ class TestSensorMQTT(unittest.TestCase):
                 'command_topic': 'command-topic',
                 'availability_topic': 'availability_topic',
                 'payload_on': 1,
-                'payload_off': 0,
-                'payload_available': 'online',
-                'payload_not_available': 'offline'
+                'payload_off': 0
             }
         })
 
@@ -195,6 +194,50 @@ class TestSensorMQTT(unittest.TestCase):
         self.assertEqual(STATE_UNAVAILABLE, state.state)
 
         fire_mqtt_message(self.hass, 'availability_topic', 'online')
+        self.hass.block_till_done()
+
+        state = self.hass.states.get('switch.test')
+        self.assertEqual(STATE_ON, state.state)
+
+    def test_custom_availability_payload(self):
+        """Test the availability payload."""
+        assert setup_component(self.hass, switch.DOMAIN, {
+            switch.DOMAIN: {
+                'platform': 'mqtt',
+                'name': 'test',
+                'state_topic': 'state-topic',
+                'command_topic': 'command-topic',
+                'availability_topic': 'availability_topic',
+                'payload_on': 1,
+                'payload_off': 0,
+                'payload_available': 'good',
+                'payload_not_available': 'nogood'
+            }
+        })
+
+        state = self.hass.states.get('switch.test')
+        self.assertEqual(STATE_UNAVAILABLE, state.state)
+
+        fire_mqtt_message(self.hass, 'availability_topic', 'good')
+        self.hass.block_till_done()
+
+        state = self.hass.states.get('switch.test')
+        self.assertEqual(STATE_OFF, state.state)
+        self.assertFalse(state.attributes.get(ATTR_ASSUMED_STATE))
+
+        fire_mqtt_message(self.hass, 'availability_topic', 'nogood')
+        self.hass.block_till_done()
+
+        state = self.hass.states.get('switch.test')
+        self.assertEqual(STATE_UNAVAILABLE, state.state)
+
+        fire_mqtt_message(self.hass, 'state-topic', '1')
+        self.hass.block_till_done()
+
+        state = self.hass.states.get('switch.test')
+        self.assertEqual(STATE_UNAVAILABLE, state.state)
+
+        fire_mqtt_message(self.hass, 'availability_topic', 'good')
         self.hass.block_till_done()
 
         state = self.hass.states.get('switch.test')

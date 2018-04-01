@@ -24,7 +24,7 @@ from homeassistant.helpers.event import track_time_change
 from homeassistant.util import convert, dt
 
 REQUIREMENTS = [
-    'google-api-python-client==1.6.2',
+    'google-api-python-client==1.6.4',
     'oauth2client==4.0.0',
 ]
 
@@ -99,10 +99,10 @@ def do_authentication(hass, config):
     from oauth2client.file import Storage
 
     oauth = OAuth2WebServerFlow(
-        config[CONF_CLIENT_ID],
-        config[CONF_CLIENT_SECRET],
-        'https://www.googleapis.com/auth/calendar.readonly',
-        'Home-Assistant.io',
+        client_id=config[CONF_CLIENT_ID],
+        client_secret=config[CONF_CLIENT_SECRET],
+        scope='https://www.googleapis.com/auth/calendar.readonly',
+        redirect_uri='Home-Assistant.io',
     )
 
     try:
@@ -128,7 +128,7 @@ def do_authentication(hass, config):
         """Keep trying to validate the user_code until it expires."""
         if now >= dt.as_local(dev_flow.user_code_expiry):
             hass.components.persistent_notification.create(
-                'Authenication code expired, please restart '
+                'Authentication code expired, please restart '
                 'Home-Assistant and try again',
                 title=NOTIFICATION_TITLE,
                 notification_id=NOTIFICATION_ID)
@@ -190,8 +190,7 @@ def setup_services(hass, track_new_found_calendars, calendar_service):
                                 hass.data[DATA_INDEX][calendar[CONF_CAL_ID]])
 
     hass.services.register(
-        DOMAIN, SERVICE_FOUND_CALENDARS, _found_calendar,
-        None, schema=None)
+        DOMAIN, SERVICE_FOUND_CALENDARS, _found_calendar)
 
     def _scan_for_calendars(service):
         """Scan for new calendars."""
@@ -204,9 +203,7 @@ def setup_services(hass, track_new_found_calendars, calendar_service):
                                calendar)
 
     hass.services.register(
-        DOMAIN, SERVICE_SCAN_CALENDARS,
-        _scan_for_calendars,
-        None, schema=None)
+        DOMAIN, SERVICE_SCAN_CALENDARS, _scan_for_calendars)
     return True
 
 
@@ -269,7 +266,7 @@ def load_config(path):
     calendars = {}
     try:
         with open(path) as file:
-            data = yaml.load(file)
+            data = yaml.safe_load(file)
             for calendar in data:
                 try:
                     calendars.update({calendar[CONF_CAL_ID]:

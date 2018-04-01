@@ -4,14 +4,11 @@ Support for MySensors switches.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/switch.mysensors/
 """
-import os
-
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant.components import mysensors
 from homeassistant.components.switch import DOMAIN, SwitchDevice
-from homeassistant.config import load_yaml_config_file
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON
 
 ATTR_IR_CODE = 'V_IR_SEND'
@@ -62,12 +59,8 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         for device in _devices:
             device.turn_on(**kwargs)
 
-    descriptions = load_yaml_config_file(
-        os.path.join(os.path.dirname(__file__), 'services.yaml'))
-
     hass.services.register(DOMAIN, SERVICE_SEND_IR_CODE,
                            send_ir_code_service,
-                           descriptions.get(SERVICE_SEND_IR_CODE),
                            schema=SEND_IR_CODE_SERVICE_SCHEMA)
 
 
@@ -78,6 +71,12 @@ class MySensorsSwitch(mysensors.MySensorsEntity, SwitchDevice):
     def assumed_state(self):
         """Return True if unable to access real state of entity."""
         return self.gateway.optimistic
+
+    @property
+    def current_power_w(self):
+        """Return the current power usage in W."""
+        set_req = self.gateway.const.SetReq
+        return self._values.get(set_req.V_WATT)
 
     @property
     def is_on(self):

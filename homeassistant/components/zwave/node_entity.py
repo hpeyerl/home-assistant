@@ -4,11 +4,10 @@ import logging
 from homeassistant.core import callback
 from homeassistant.const import ATTR_BATTERY_LEVEL, ATTR_WAKEUP, ATTR_ENTITY_ID
 from homeassistant.helpers.entity import Entity
-from homeassistant.util import slugify
 
 from .const import (
     ATTR_NODE_ID, COMMAND_CLASS_WAKE_UP, ATTR_SCENE_ID, ATTR_SCENE_DATA,
-    ATTR_BASIC_LEVEL, EVENT_NODE_EVENT, EVENT_SCENE_ACTIVATED, DOMAIN,
+    ATTR_BASIC_LEVEL, EVENT_NODE_EVENT, EVENT_SCENE_ACTIVATED,
     COMMAND_CLASS_CENTRAL_SCENE)
 from .util import node_name
 
@@ -41,8 +40,6 @@ class ZWaveBaseEntity(Entity):
     def __init__(self):
         """Initialize the base Z-Wave class."""
         self._update_scheduled = False
-        self.old_entity_id = None
-        self.new_entity_id = None
 
     def maybe_schedule_update(self):
         """Maybe schedule state update.
@@ -69,15 +66,10 @@ class ZWaveBaseEntity(Entity):
         self.hass.loop.call_later(0.1, do_update)
 
 
-def sub_status(status, stage):
-    """Format sub-status."""
-    return '{} ({})'.format(status, stage) if stage else status
-
-
 class ZWaveNodeEntity(ZWaveBaseEntity):
     """Representation of a Z-Wave node."""
 
-    def __init__(self, node, network, new_entity_ids):
+    def __init__(self, node, network):
         """Initialize node."""
         # pylint: disable=import-error
         super().__init__()
@@ -89,11 +81,6 @@ class ZWaveNodeEntity(ZWaveBaseEntity):
         self._name = node_name(self.node)
         self._product_name = node.product_name
         self._manufacturer_name = node.manufacturer_name
-        self.old_entity_id = "{}.{}_{}".format(
-            DOMAIN, slugify(self._name), self.node_id)
-        self.new_entity_id = "{}.{}".format(DOMAIN, slugify(self._name))
-        if not new_entity_ids:
-            self.entity_id = self.old_entity_id
         self._attributes = {}
         self.wakeup_interval = None
         self.location = None
@@ -142,6 +129,9 @@ class ZWaveNodeEntity(ZWaveBaseEntity):
 
         if self.node.can_wake_up():
             for value in self.node.get_values(COMMAND_CLASS_WAKE_UP).values():
+                if value.index != 0:
+                    continue
+
                 self.wakeup_interval = value.data
                 break
         else:
@@ -201,17 +191,17 @@ class ZWaveNodeEntity(ZWaveBaseEntity):
         """Return the state."""
         if ATTR_READY not in self._attributes:
             return None
-        stage = ''
-        if not self._attributes[ATTR_READY]:
-            # If node is not ready use stage as sub-status.
-            stage = self._attributes[ATTR_QUERY_STAGE]
+
         if self._attributes[ATTR_FAILED]:
-            return sub_status('Dead', stage)
+            return 'dead'
+        if self._attributes[ATTR_QUERY_STAGE] != 'Complete':
+            return 'initializing'
         if not self._attributes[ATTR_AWAKE]:
-            return sub_status('Sleeping', stage)
+            return 'sleeping'
         if self._attributes[ATTR_READY]:
-            return sub_status('Ready', stage)
-        return stage
+            return 'ready'
+
+        return None
 
     @property
     def should_poll(self):
@@ -231,8 +221,6 @@ class ZWaveNodeEntity(ZWaveBaseEntity):
             ATTR_NODE_NAME: self._name,
             ATTR_MANUFACTURER_NAME: self._manufacturer_name,
             ATTR_PRODUCT_NAME: self._product_name,
-            'old_entity_id': self.old_entity_id,
-            'new_entity_id': self.new_entity_id,
         }
         attrs.update(self._attributes)
         if self.battery_level is not None:

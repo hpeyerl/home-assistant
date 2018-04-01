@@ -1,5 +1,4 @@
 """Module to help with parsing and generating configuration files."""
-import asyncio
 from collections import OrderedDict
 # pylint: disable=no-name-in-module
 from distutils.version import LooseVersion  # pylint: disable=import-error
@@ -7,7 +6,6 @@ import logging
 import os
 import re
 import shutil
-import sys
 # pylint: disable=unused-import
 from typing import Any, List, Tuple  # NOQA
 
@@ -15,6 +13,7 @@ import voluptuous as vol
 from voluptuous.humanize import humanize_error
 
 from homeassistant.const import (
+    ATTR_FRIENDLY_NAME, ATTR_HIDDEN, ATTR_ASSUMED_STATE,
     CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME, CONF_PACKAGES, CONF_UNIT_SYSTEM,
     CONF_TIME_ZONE, CONF_ELEVATION, CONF_UNIT_SYSTEM_METRIC,
     CONF_UNIT_SYSTEM_IMPERIAL, CONF_TEMPERATURE_UNIT, TEMP_CELSIUS,
@@ -23,7 +22,7 @@ from homeassistant.const import (
 from homeassistant.core import callback, DOMAIN as CONF_CORE
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.loader import get_component, get_platform
-from homeassistant.util.yaml import load_yaml
+from homeassistant.util.yaml import load_yaml, SECRET_YAML
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import dt as date_util, location as loc_util
 from homeassistant.util.unit_system import IMPERIAL_SYSTEM, METRIC_SYSTEM
@@ -33,15 +32,17 @@ from homeassistant.helpers import config_per_platform, extract_domain_configs
 _LOGGER = logging.getLogger(__name__)
 
 DATA_PERSISTENT_ERRORS = 'bootstrap_persistent_errors'
+RE_YAML_ERROR = re.compile(r"homeassistant\.util\.yaml")
+RE_ASCII = re.compile(r"\033\[[^m]*m")
 HA_COMPONENT_URL = '[{}](https://home-assistant.io/components/{}/)'
 YAML_CONFIG_FILE = 'configuration.yaml'
 VERSION_FILE = '.HA_VERSION'
 CONFIG_DIR_NAME = '.homeassistant'
 DATA_CUSTOMIZE = 'hass_customize'
 
-FILE_MIGRATION = [
-    ['ios.conf', '.ios.conf'],
-]
+FILE_MIGRATION = (
+    ('ios.conf', '.ios.conf'),
+)
 
 DEFAULT_CORE_CONFIG = (
     # Tuples (attribute, default, auto detect property, description)
@@ -70,8 +71,8 @@ frontend:
 config:
 
 http:
-  # Uncomment this to add a password (recommended!)
-  # api_password: PASSWORD
+  # Secrets are defined in the file secrets.yaml
+  # api_password: !secret http_password
   # Uncomment this if you are using SSL/TLS, running in Docker container, etc.
   # base_url: example.duckdns.org:8123
 
@@ -96,6 +97,9 @@ history:
 # View all events in a logbook
 logbook:
 
+# Enables a map showing the location of tracked devices
+map:
+
 # Track the sun
 sun:
 
@@ -107,24 +111,38 @@ sensor:
 tts:
   - platform: google
 
+# Cloud
+cloud:
+
 group: !include groups.yaml
 automation: !include automations.yaml
 script: !include scripts.yaml
+"""
+DEFAULT_SECRETS = """
+# Use this file to store secrets like usernames and passwords.
+# Learn more at https://home-assistant.io/docs/configuration/secrets/
+http_password: welcome
 """
 
 
 PACKAGES_CONFIG_SCHEMA = vol.Schema({
     cv.slug: vol.Schema(  # Package names are slugs
-        {cv.slug: vol.Any(dict, list)})  # Only slugs for component names
+        {cv.slug: vol.Any(dict, list, None)})  # Only slugs for component names
 })
+
+CUSTOMIZE_DICT_SCHEMA = vol.Schema({
+    vol.Optional(ATTR_FRIENDLY_NAME): cv.string,
+    vol.Optional(ATTR_HIDDEN): cv.boolean,
+    vol.Optional(ATTR_ASSUMED_STATE): cv.boolean,
+}, extra=vol.ALLOW_EXTRA)
 
 CUSTOMIZE_CONFIG_SCHEMA = vol.Schema({
     vol.Optional(CONF_CUSTOMIZE, default={}):
-        vol.Schema({cv.entity_id: dict}),
+        vol.Schema({cv.entity_id: CUSTOMIZE_DICT_SCHEMA}),
     vol.Optional(CONF_CUSTOMIZE_DOMAIN, default={}):
-        vol.Schema({cv.string: dict}),
+        vol.Schema({cv.string: CUSTOMIZE_DICT_SCHEMA}),
     vol.Optional(CONF_CUSTOMIZE_GLOB, default={}):
-        vol.Schema({cv.string: OrderedDict}),
+        vol.Schema({cv.string: CUSTOMIZE_DICT_SCHEMA}),
 })
 
 CORE_CONFIG_SCHEMA = CUSTOMIZE_CONFIG_SCHEMA.extend({
@@ -149,7 +167,7 @@ def get_default_config_dir() -> str:
     return os.path.join(data_dir, CONFIG_DIR_NAME)
 
 
-def ensure_config_exists(config_dir: str, detect_location: bool=True) -> str:
+def ensure_config_exists(config_dir: str, detect_location: bool = True) -> str:
     """Ensure a configuration file exists in given configuration directory.
 
     Creating a default one if needed.
@@ -181,6 +199,7 @@ def create_default_config(config_dir, detect_location=True):
         CONFIG_PATH as CUSTOMIZE_CONFIG_PATH)
 
     config_path = os.path.join(config_dir, YAML_CONFIG_FILE)
+    secret_path = os.path.join(config_dir, SECRET_YAML)
     version_path = os.path.join(config_dir, VERSION_FILE)
     group_yaml_path = os.path.join(config_dir, GROUP_CONFIG_PATH)
     automation_yaml_path = os.path.join(config_dir, AUTOMATION_CONFIG_PATH)
@@ -209,7 +228,7 @@ def create_default_config(config_dir, detect_location=True):
     # Writing files with YAML does not create the most human readable results
     # So we're hard coding a YAML template.
     try:
-        with open(config_path, 'w') as config_file:
+        with open(config_path, 'wt') as config_file:
             config_file.write("homeassistant:\n")
 
             for attr, _, _, description in DEFAULT_CORE_CONFIG:
@@ -220,6 +239,9 @@ def create_default_config(config_dir, detect_location=True):
                 config_file.write("  {}: {}\n".format(attr, info[attr]))
 
             config_file.write(DEFAULT_CONFIG)
+
+        with open(secret_path, 'wt') as secret_file:
+            secret_file.write(DEFAULT_SECRETS)
 
         with open(version_path, 'wt') as version_file:
             version_file.write(__version__)
@@ -243,8 +265,7 @@ def create_default_config(config_dir, detect_location=True):
         return None
 
 
-@asyncio.coroutine
-def async_hass_config_yaml(hass):
+async def async_hass_config_yaml(hass):
     """Load YAML from a Home Assistant configuration file.
 
     This function allow a component inside the asyncio loop to reload its
@@ -257,7 +278,7 @@ def async_hass_config_yaml(hass):
         conf = load_yaml_config_file(path)
         return conf
 
-    conf = yield from hass.async_add_job(_load_hass_yaml_config)
+    conf = await hass.async_add_job(_load_hass_yaml_config)
     return conf
 
 
@@ -288,6 +309,9 @@ def load_yaml_config_file(config_path):
         _LOGGER.error(msg)
         raise HomeAssistantError(msg)
 
+    # Convert values to dictionaries if they are None
+    for key, value in conf_dict.items():
+        conf_dict[key] = value or {}
     return conf_dict
 
 
@@ -329,14 +353,22 @@ def process_ha_config_upgrade(hass):
 
 @callback
 def async_log_exception(ex, domain, config, hass):
+    """Log an error for configuration validation.
+
+    This method must be run in the event loop.
+    """
+    if hass is not None:
+        async_notify_setup_error(hass, domain, True)
+    _LOGGER.error(_format_config_error(ex, domain, config))
+
+
+@callback
+def _format_config_error(ex, domain, config):
     """Generate log exception for configuration validation.
 
     This method must be run in the event loop.
     """
     message = "Invalid config for [{}]: ".format(domain)
-    if hass is not None:
-        async_notify_setup_error(hass, domain, True)
-
     if 'extra keys not allowed' in ex.error_message:
         message += '[{}] is an invalid option for [{}]. Check: {}->{}.'\
                    .format(ex.path[-1], domain, domain,
@@ -353,11 +385,10 @@ def async_log_exception(ex, domain, config, hass):
         message += ('Please check the docs at '
                     'https://home-assistant.io/components/{}/'.format(domain))
 
-    _LOGGER.error(message)
+    return message
 
 
-@asyncio.coroutine
-def async_process_ha_core_config(hass, config):
+async def async_process_ha_core_config(hass, config):
     """Process the [homeassistant] section from the configuration.
 
     This method is a coroutine.
@@ -444,7 +475,7 @@ def async_process_ha_core_config(hass, config):
     # If we miss some of the needed values, auto detect them
     if None in (hac.latitude, hac.longitude, hac.units,
                 hac.time_zone):
-        info = yield from hass.async_add_job(
+        info = await hass.async_add_job(
             loc_util.detect_location_info)
 
         if info is None:
@@ -470,7 +501,7 @@ def async_process_ha_core_config(hass, config):
 
     if hac.elevation is None and hac.latitude is not None and \
        hac.longitude is not None:
-        elevation = yield from hass.async_add_job(
+        elevation = await hass.async_add_job(
             loc_util.elevation, hac.latitude, hac.longitude)
         hac.elevation = elevation
         discovered.append(('elevation', elevation))
@@ -482,7 +513,7 @@ def async_process_ha_core_config(hass, config):
 
 
 def _log_pkg_error(package, component, config, message):
-    """Log an error while merging."""
+    """Log an error while merging packages."""
     message = "Package {} setup failed. Component {} {}".format(
         package, component, message)
 
@@ -508,7 +539,7 @@ def _identify_config_schema(module):
     return '', schema
 
 
-def merge_packages_config(config, packages):
+def merge_packages_config(config, packages, _log_pkg_error=_log_pkg_error):
     """Merge packages into the top-level configuration. Mutate config."""
     # pylint: disable=too-many-nested-blocks
     PACKAGES_CONFIG_SCHEMA(packages)
@@ -523,6 +554,8 @@ def merge_packages_config(config, packages):
                 continue
 
             if hasattr(component, 'PLATFORM_SCHEMA'):
+                if not comp_conf:
+                    continue  # Ensure we dont add Falsy items to list
                 config[comp_name] = cv.ensure_list(config.get(comp_name))
                 config[comp_name].extend(cv.ensure_list(comp_conf))
                 continue
@@ -531,11 +564,16 @@ def merge_packages_config(config, packages):
                 merge_type, _ = _identify_config_schema(component)
 
                 if merge_type == 'list':
+                    if not comp_conf:
+                        continue  # Ensure we dont add Falsy items to list
                     config[comp_name] = cv.ensure_list(config.get(comp_name))
                     config[comp_name].extend(cv.ensure_list(comp_conf))
                     continue
 
                 if merge_type == 'dict':
+                    if comp_conf is None:
+                        comp_conf = OrderedDict()
+
                     if not isinstance(comp_conf, dict):
                         _log_pkg_error(
                             pack_name, comp_name, config,
@@ -574,7 +612,7 @@ def merge_packages_config(config, packages):
 def async_process_component_config(hass, config, domain):
     """Check component configuration and return processed configuration.
 
-    Raise a vol.Invalid exception on error.
+    Returns None on error.
 
     This method must be run in the event loop.
     """
@@ -631,28 +669,23 @@ def async_process_component_config(hass, config, domain):
     return config
 
 
-@asyncio.coroutine
-def async_check_ha_config_file(hass):
+async def async_check_ha_config_file(hass):
     """Check if Home Assistant configuration file is valid.
 
     This method is a coroutine.
     """
-    proc = yield from asyncio.create_subprocess_exec(
-        sys.executable, '-m', 'homeassistant', '--script',
-        'check_config', '--config', hass.config.config_dir,
-        stdout=asyncio.subprocess.PIPE, loop=hass.loop)
-    # Wait for the subprocess exit
-    stdout_data, dummy = yield from proc.communicate()
-    result = yield from proc.wait()
+    from homeassistant.scripts.check_config import check_ha_config_file
 
-    if not result:
+    res = await hass.async_add_job(
+        check_ha_config_file, hass.config.config_dir)
+
+    if not res.errors:
         return None
-
-    return re.sub(r'\033\[[^m]*m', '', str(stdout_data, 'utf-8'))
+    return '\n'.join([err.message for err in res.errors])
 
 
 @callback
-def async_notify_setup_error(hass, component, link=False):
+def async_notify_setup_error(hass, component, display_link=False):
     """Print a persistent notification.
 
     This method must be run in the event loop.
@@ -664,10 +697,19 @@ def async_notify_setup_error(hass, component, link=False):
     if errors is None:
         errors = hass.data[DATA_PERSISTENT_ERRORS] = {}
 
-    errors[component] = errors.get(component) or link
-    _lst = [HA_COMPONENT_URL.format(name.replace('_', '-'), name)
-            if link else name for name, link in errors.items()]
-    message = ('The following components and platforms could not be set up:\n'
-               '* ' + '\n* '.join(list(_lst)) + '\nPlease check your config')
+    errors[component] = errors.get(component) or display_link
+
+    message = 'The following components and platforms could not be set up:\n\n'
+
+    for name, link in errors.items():
+        if link:
+            part = HA_COMPONENT_URL.format(name.replace('_', '-'), name)
+        else:
+            part = name
+
+        message += ' - {}\n'.format(part)
+
+    message += '\nPlease check your config.'
+
     persistent_notification.async_create(
         hass, message, 'Invalid config', 'invalid_config')

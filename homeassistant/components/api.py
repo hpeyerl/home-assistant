@@ -13,7 +13,7 @@ import async_timeout
 
 import homeassistant.core as ha
 import homeassistant.remote as rem
-from homeassistant.bootstrap import ERROR_LOG_FILENAME
+from homeassistant.bootstrap import DATA_LOGGING
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP, EVENT_TIME_CHANGED,
     HTTP_BAD_REQUEST, HTTP_CREATED, HTTP_NOT_FOUND,
@@ -24,6 +24,7 @@ from homeassistant.const import (
     __version__)
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers.state import AsyncTrackStates
+from homeassistant.helpers.service import async_get_all_descriptions
 from homeassistant.helpers import template
 from homeassistant.components.http import HomeAssistantView
 
@@ -51,8 +52,9 @@ def setup(hass, config):
     hass.http.register_view(APIComponentsView)
     hass.http.register_view(APITemplateView)
 
-    hass.http.register_static_path(
-        URL_API_ERROR_LOG, hass.config.path(ERROR_LOG_FILENAME), False)
+    log_path = hass.data.get(DATA_LOGGING, None)
+    if log_path:
+        hass.http.register_static_path(URL_API_ERROR_LOG, log_path, False)
 
     return True
 
@@ -129,8 +131,7 @@ class APIEventStream(HomeAssistantView):
                     msg = "data: {}\n\n".format(payload)
                     _LOGGER.debug('STREAM %s WRITING %s', id(stop_obj),
                                   msg.strip())
-                    response.write(msg.encode("UTF-8"))
-                    yield from response.drain()
+                    yield from response.write(msg.encode("UTF-8"))
                 except asyncio.TimeoutError:
                     yield from to_write.put(STREAM_PING_PAYLOAD)
 
@@ -261,7 +262,11 @@ class APIEventView(HomeAssistantView):
     def post(self, request, event_type):
         """Fire events."""
         body = yield from request.text()
-        event_data = json.loads(body) if body else None
+        try:
+            event_data = json.loads(body) if body else None
+        except ValueError:
+            return self.json_message('Event data should be valid JSON',
+                                     HTTP_BAD_REQUEST)
 
         if event_data is not None and not isinstance(event_data, dict):
             return self.json_message('Event data should be a JSON object',
@@ -288,10 +293,11 @@ class APIServicesView(HomeAssistantView):
     url = URL_API_SERVICES
     name = "api:services"
 
-    @ha.callback
+    @asyncio.coroutine
     def get(self, request):
         """Get registered services."""
-        return self.json(async_services_json(request.app['hass']))
+        services = yield from async_services_json(request.app['hass'])
+        return self.json(services)
 
 
 class APIDomainServicesView(HomeAssistantView):
@@ -308,7 +314,11 @@ class APIDomainServicesView(HomeAssistantView):
         """
         hass = request.app['hass']
         body = yield from request.text()
-        data = json.loads(body) if body else None
+        try:
+            data = json.loads(body) if body else None
+        except ValueError:
+            return self.json_message('Data should be valid JSON',
+                                     HTTP_BAD_REQUEST)
 
         with AsyncTrackStates(hass) as changed_states:
             yield from hass.services.async_call(domain, service, data, True)
@@ -346,10 +356,12 @@ class APITemplateView(HomeAssistantView):
                                      HTTP_BAD_REQUEST)
 
 
+@asyncio.coroutine
 def async_services_json(hass):
     """Generate services data to JSONify."""
+    descriptions = yield from async_get_all_descriptions(hass)
     return [{"domain": key, "services": value}
-            for key, value in hass.services.async_services().items()]
+            for key, value in descriptions.items()]
 
 
 def async_events_json(hass):
