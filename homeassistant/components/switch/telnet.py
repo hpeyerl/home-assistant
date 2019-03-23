@@ -25,21 +25,20 @@ SWITCH_SCHEMA = vol.Schema({
     vol.Required(CONF_COMMAND_OFF): cv.string,
     vol.Required(CONF_COMMAND_ON): cv.string,
     vol.Required(CONF_RESOURCE): cv.string,
-    vol.Required(CONF_VALUE_TEMPLATE): cv.template,
+    vol.Optional(CONF_VALUE_TEMPLATE): cv.template,
     vol.Optional(CONF_COMMAND_STATE): cv.string,
     vol.Optional(CONF_NAME): cv.string,
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_SWITCHES): vol.Schema({cv.slug: SWITCH_SCHEMA}),
+    vol.Required(CONF_SWITCHES): cv.schema_with_slug_keys(SWITCH_SCHEMA),
 })
 
 SCAN_INTERVAL = timedelta(seconds=10)
 
 
-# pylint: disable=unused-argument
-def setup_platform(hass, config, add_devices, discovery_info=None):
+def setup_platform(hass, config, add_entities, discovery_info=None):
     """Find and return switches controlled by telnet commands."""
     devices = config.get(CONF_SWITCHES, {})
     switches = []
@@ -68,7 +67,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         _LOGGER.error("No switches added")
         return
 
-    add_devices(switches)
+    add_entities(switches)
 
 
 class TelnetSwitch(SwitchDevice):

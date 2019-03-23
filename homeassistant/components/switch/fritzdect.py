@@ -12,7 +12,7 @@ import voluptuous as vol
 
 from homeassistant.components.switch import (SwitchDevice, PLATFORM_SCHEMA)
 from homeassistant.const import (
-    CONF_HOST, CONF_PASSWORD, CONF_USERNAME)
+    CONF_HOST, CONF_PASSWORD, CONF_USERNAME, POWER_WATT, ENERGY_KILO_WATT_HOUR)
 import homeassistant.helpers.config_validation as cv
 from homeassistant.const import TEMP_CELSIUS, ATTR_TEMPERATURE
 
@@ -25,11 +25,11 @@ DEFAULT_HOST = 'fritz.box'
 
 ATTR_CURRENT_CONSUMPTION = 'current_consumption'
 ATTR_CURRENT_CONSUMPTION_UNIT = 'current_consumption_unit'
-ATTR_CURRENT_CONSUMPTION_UNIT_VALUE = 'W'
+ATTR_CURRENT_CONSUMPTION_UNIT_VALUE = POWER_WATT
 
 ATTR_TOTAL_CONSUMPTION = 'total_consumption'
 ATTR_TOTAL_CONSUMPTION_UNIT = 'total_consumption_unit'
-ATTR_TOTAL_CONSUMPTION_UNIT_VALUE = 'kWh'
+ATTR_TOTAL_CONSUMPTION_UNIT_VALUE = ENERGY_KILO_WATT_HOUR
 
 ATTR_TEMPERATURE_UNIT = 'temperature_unit'
 
@@ -40,7 +40,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
+def setup_platform(hass, config, add_entities, discovery_info=None):
     """Add all switches connected to Fritz Box."""
     from fritzhome.fritz import FritzBox
 
@@ -52,7 +52,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     fritz = FritzBox(host, username, password)
     try:
         fritz.login()
-    except Exception:  # pylint: disable=W0703
+    except Exception:  # pylint: disable=broad-except
         _LOGGER.error("Login to Fritz!Box failed")
         return
 
@@ -62,7 +62,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         if actor.has_switch:
             data = FritzDectSwitchData(fritz, actor.actor_id)
             data.is_online = True
-            add_devices([FritzDectSwitch(hass, data, actor.name)], True)
+            add_entities([FritzDectSwitch(hass, data, actor.name)], True)
 
 
 class FritzDectSwitch(SwitchDevice):
@@ -105,7 +105,7 @@ class FritzDectSwitch(SwitchDevice):
         return attrs
 
     @property
-    def current_power_watt(self):
+    def current_power_w(self):
         """Return the current power usage in Watt."""
         try:
             return float(self.data.current_consumption)
@@ -163,7 +163,7 @@ class FritzDectSwitch(SwitchDevice):
             self.data.is_online = False
 
 
-class FritzDectSwitchData(object):
+class FritzDectSwitchData:
     """Get the latest data from the fritz box."""
 
     def __init__(self, fritz, ain):

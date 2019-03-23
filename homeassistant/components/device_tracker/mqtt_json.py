@@ -4,13 +4,12 @@ Support for GPS tracking MQTT enabled devices.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/device_tracker.mqtt_json/
 """
-import asyncio
 import json
 import logging
 
 import voluptuous as vol
 
-import homeassistant.components.mqtt as mqtt
+from homeassistant.components import mqtt
 from homeassistant.core import callback
 from homeassistant.components.mqtt import CONF_QOS
 from homeassistant.components.device_tracker import PLATFORM_SCHEMA
@@ -35,31 +34,30 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(mqtt.SCHEMA_BASE).extend({
 })
 
 
-@asyncio.coroutine
-def async_setup_scanner(hass, config, async_see, discovery_info=None):
+async def async_setup_scanner(hass, config, async_see, discovery_info=None):
     """Set up the MQTT JSON tracker."""
     devices = config[CONF_DEVICES]
     qos = config[CONF_QOS]
 
     for dev_id, topic in devices.items():
         @callback
-        def async_message_received(topic, payload, qos, dev_id=dev_id):
+        def async_message_received(msg, dev_id=dev_id):
             """Handle received MQTT message."""
             try:
-                data = GPS_JSON_PAYLOAD_SCHEMA(json.loads(payload))
+                data = GPS_JSON_PAYLOAD_SCHEMA(json.loads(msg.payload))
             except vol.MultipleInvalid:
                 _LOGGER.error("Skipping update for following data "
                               "because of missing or malformatted data: %s",
-                              payload)
+                              msg.payload)
                 return
             except ValueError:
-                _LOGGER.error("Error parsing JSON payload: %s", payload)
+                _LOGGER.error("Error parsing JSON payload: %s", msg.payload)
                 return
 
             kwargs = _parse_see_args(dev_id, data)
-            hass.async_add_job(async_see(**kwargs))
+            hass.async_create_task(async_see(**kwargs))
 
-        yield from mqtt.async_subscribe(
+        await mqtt.async_subscribe(
             hass, topic, async_message_received, qos)
 
     return True
