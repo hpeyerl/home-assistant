@@ -33,3 +33,19 @@ test
 
 When tested and satisfied, git push.
 
+----
+from 0.77 to 0.90
+
+  580  git clone https://github.com/home-assistant/home-assistant.git hass2
+  589  git clone https://github.com/hpeyerl/home-assistant hass2
+  591  git remote add upstream    https://github.com/home-assistant/home-assistant.git
+  596  git checkout master
+  597  git fetch upstream
+  599  git merge upstream/master
+  601  git diff
+  602  git status
+  603  git add .coveragerc
+  605  git add requirements_all.txt
+  606  git commit -m "resolve conflicts"
+  607  git merge upstream/master
+  608  git push origin
