@@ -62,4 +62,4 @@ class EtherRainSwitch(SwitchDevice):
         self.on_handler(self._valve, self._duration)
 
     def turn_off(self, **kwargs):
-        self.off_handler(self._valve)
+        self.off_handler()
